@@ -20,7 +20,6 @@ def brave_search(query, freshness=None):
     url = "https://api.search.brave.com/res/v1/web/search"
     headers = {"X-Subscription-Token": BRAVE_API}
     params = {"q": query, "count": 5}
-
     if freshness:
         params["freshness"] = freshness
 
@@ -36,9 +35,6 @@ def brave_search(query, freshness=None):
     )
 
 
-# -----------------------------
-# 情報収集
-# -----------------------------
 def gather_data():
     web = brave_search("Solana Mobile Season2 SKR XP allocation new dapp")
     x = brave_search("""
@@ -51,27 +47,27 @@ def gather_data():
 
 
 # -----------------------------
-# Gemini分析（完全安定JSON抽出）
+# Gemini戦略分析
 # -----------------------------
 def analyze(text):
     url = f"https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent?key={GEMINI_API}"
 
     prompt = f"""
-Solana Mobile Season2 レベル5専用AI。
-必ずJSONのみ出力。他の文章は禁止。
+あなたはSeason2攻略専門の戦略AI。
+
+ニュース要約は禁止。
+戦略分析のみ出力。
+
+JSONのみ返す：
 
 {{
-"scores": {{
-  "new_dapp": 0-25,
-  "xp": 0-20,
-  "skr": 0-20,
-  "freshness": 0-15,
-  "risk": -10 to +10
-}},
-"dapps": ["dApp名"],
-"keywords": ["重要語句"],
-"summary": "日本語要約",
-"action_plan": "今日やるべき具体的行動"
+"alpha_signal_strength": 0-100,
+"early_advantage": 0-100,
+"allocation_impact": 0-100,
+"behavior_shift_detected": true/false,
+"season2_intent": "Season2の評価軸推定",
+"strategic_play": "今日やるべき具体戦略",
+"risk_note": "注意点"
 }}
 
 {text}
@@ -83,7 +79,7 @@ Solana Mobile Season2 レベル5専用AI。
             "parts": [{"text": prompt}]
         }],
         "generationConfig": {
-            "temperature": 0.2
+            "temperature": 0.3
         }
     }
 
@@ -95,16 +91,13 @@ Solana Mobile Season2 レベル5専用AI。
 
     raw = response_json["candidates"][0]["content"]["parts"][0]["text"]
 
-    # ✅ JSON部分のみ安全抽出
     start = raw.find("{")
     end = raw.rfind("}") + 1
 
     if start == -1 or end == -1:
         raise ValueError("JSONが検出できません")
 
-    json_text = raw[start:end]
-
-    return json.loads(json_text)
+    return json.loads(raw[start:end])
 
 
 # -----------------------------
@@ -112,8 +105,7 @@ Solana Mobile Season2 レベル5専用AI。
 # -----------------------------
 def load_state():
     if not os.path.exists(STATE_FILE):
-        return {"history": [], "dapp_counts": {}}
-
+        return {"history": []}
     with open(STATE_FILE, "r") as f:
         return json.load(f)
 
@@ -124,87 +116,65 @@ def save_state(state):
 
 
 # -----------------------------
-# スコア計算
+# 総合判定
 # -----------------------------
 def calculate_score(data, state):
-    s = data["scores"]
-
-    total = (
-        s["new_dapp"] +
-        s["xp"] +
-        s["skr"] +
-        s["freshness"] +
-        s["risk"]
+    score = (
+        data["alpha_signal_strength"] * 0.4 +
+        data["early_advantage"] * 0.2 +
+        data["allocation_impact"] * 0.3
     )
 
-    total = max(0, min(100, total))
+    if data["behavior_shift_detected"]:
+        score += 10
 
-    # dApp出現回数更新
-    for d in data["dapps"]:
-        state["dapp_counts"][d] = state["dapp_counts"].get(d, 0) + 1
+    score = round(min(100, score), 1)
 
-    state["history"].append(total)
+    state["history"].append(score)
 
-    prev = state["history"][-2] if len(state["history"]) > 1 else total
-    diff = total - prev
+    prev = state["history"][-2] if len(state["history"]) > 1 else score
+    diff = round(score - prev, 1)
 
-    return total, diff
-
-
-# -----------------------------
-# SKRレンジ推定
-# -----------------------------
-def skr_range(score):
-    if score >= 80:
-        return "500k〜750k（Sovereign帯）"
-    elif score >= 60:
-        return "250k〜500k"
-    else:
-        return "〜250k"
+    return score, diff
 
 
 # -----------------------------
-# メール作成
+# メール生成（戦略のみ）
 # -----------------------------
-def build_email(data, score, diff, state):
-    ranking = sorted(
-        state["dapp_counts"].items(),
-        key=lambda x: x[1],
-        reverse=True
-    )[:5]
-
-    ranking_text = "\n".join(
-        [f"{r[0]} ({r[1]}回)" for r in ranking]
-    )
-
-    emergency = "【緊急】" if diff >= 15 else ""
+def build_email(data, score, diff):
+    emergency = "【環境変化検出】" if data["behavior_shift_detected"] else ""
+    spike = "【急騰】" if diff >= 15 else ""
 
     content = f"""
-{emergency}🔥 L5戦略AI V3 {datetime.now().date()}
+{emergency}{spike}🔥 Season2 戦略AI
 
-【本日スコア】{score}
+【Alpha強度】{data["alpha_signal_strength"]}
+【先行者優位度】{data["early_advantage"]}
+【Allocation影響度】{data["allocation_impact"]}
+【環境変化】{data["behavior_shift_detected"]}
+
+【総合戦略スコア】{score}
 【前日差】{diff}
-【予想SKRレンジ】{skr_range(score)}
 
-🔥 注目dAppランキング
-{ranking_text}
+🧠 Season2意図推定
+{data["season2_intent"]}
 
---- 要約 ---
-{data["summary"]}
+🎯 今日の最適戦略
+{data["strategic_play"]}
 
-🎯 今日の行動提案
-{data["action_plan"]}
+⚠ リスク
+{data["risk_note"]}
 """
 
-    return content, emergency
+    return content
 
 
 # -----------------------------
 # メール送信
 # -----------------------------
-def send_email(content, emergency):
+def send_email(content):
     msg = MIMEText(content, "plain", "utf-8")
-    msg["Subject"] = f"{emergency}L5戦略AI {datetime.now().date()}"
+    msg["Subject"] = f"Season2戦略AI {datetime.now().date()}"
     msg["From"] = GMAIL_USER
     msg["To"] = GMAIL_USER
 
@@ -214,7 +184,7 @@ def send_email(content, emergency):
 
 
 # -----------------------------
-# メイン実行
+# 実行
 # -----------------------------
 if __name__ == "__main__":
     state = load_state()
@@ -225,8 +195,8 @@ if __name__ == "__main__":
 
     score, diff = calculate_score(analysis, state)
 
-    email_content, emergency = build_email(analysis, score, diff, state)
+    email = build_email(analysis, score, diff)
 
-    send_email(email_content, emergency)
+    send_email(email)
 
     save_state(state)
