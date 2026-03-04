@@ -12,9 +12,7 @@ GMAIL_PASS = os.getenv("GMAIL_PASS")
 
 def search_brave():
     url = "https://api.search.brave.com/res/v1/web/search"
-    headers = {
-        "X-Subscription-Token": BRAVE_API
-    }
+    headers = {"X-Subscription-Token": BRAVE_API}
     params = {
         "q": "Solana Mobile Season 2 Level 5 XP strategy OR new dapp OR airdrop update",
         "freshness": "pd",
@@ -34,10 +32,11 @@ def search_brave():
 
 
 def analyze_gemini(text):
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.0-pro:generateContent?key={GEMINI_API}"
+    url = f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key={GEMINI_API}"
 
     body = {
         "contents": [{
+            "role": "user",
             "parts": [{
                 "text": f"""
 Analyze this information for Solana Mobile Season 2.
