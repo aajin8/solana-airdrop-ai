@@ -18,7 +18,14 @@ def search_brave():
         "count": 5
     }
     r = requests.get(url, headers=headers, params=params)
-    return r.json()
+    data = r.json()
+    
+    if "web" not in data:
+        return "Brave API error:\n" + str(data)
+    
+    return "\n".join(
+        [r["title"] + " " + r.get("description", "") for r in data["web"]["results"]]
+    )
 
 def analyze_gemini(text):
     url = f"https://generativelanguage.googleapis.com/v1/models/gemini-pro:generateContent?key={GEMINI_API}"
@@ -52,9 +59,6 @@ def send_email(content):
         server.send_message(msg)
 
 if __name__ == "__main__":
-    data = search_brave()
-    combined = "\n".join(
-        [r["title"] + " " + r["description"] for r in data["web"]["results"]]
-    )
-    report = analyze_gemini(combined)
+    search_result = search_brave()
+    report = analyze_gemini(search_result)
     send_email(report)
