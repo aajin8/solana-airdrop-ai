@@ -20,6 +20,7 @@ def brave_search(query, freshness=None):
     url = "https://api.search.brave.com/res/v1/web/search"
     headers = {"X-Subscription-Token": BRAVE_API}
     params = {"q": query, "count": 5}
+
     if freshness:
         params["freshness"] = freshness
 
@@ -35,6 +36,9 @@ def brave_search(query, freshness=None):
     )
 
 
+# -----------------------------
+# 情報収集
+# -----------------------------
 def gather_data():
     web = brave_search("Solana Mobile Season2 SKR XP allocation new dapp")
     x = brave_search("""
@@ -47,15 +51,14 @@ def gather_data():
 
 
 # -----------------------------
-# Gemini分析＋行動提案
+# Gemini分析（完全安定JSON抽出）
 # -----------------------------
 def analyze(text):
     url = f"https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent?key={GEMINI_API}"
 
     prompt = f"""
 Solana Mobile Season2 レベル5専用AI。
-
-JSONのみ出力：
+必ずJSONのみ出力。他の文章は禁止。
 
 {{
 "scores": {{
@@ -78,12 +81,30 @@ JSONのみ出力：
         "contents": [{
             "role": "user",
             "parts": [{"text": prompt}]
-        }]
+        }],
+        "generationConfig": {
+            "temperature": 0.2
+        }
     }
 
     r = requests.post(url, json=body)
-    raw = r.json()["candidates"][0]["content"]["parts"][0]["text"]
-    return json.loads(raw[raw.find("{"):])
+    response_json = r.json()
+
+    if "candidates" not in response_json:
+        raise Exception(f"Gemini API Error: {response_json}")
+
+    raw = response_json["candidates"][0]["content"]["parts"][0]["text"]
+
+    # ✅ JSON部分のみ安全抽出
+    start = raw.find("{")
+    end = raw.rfind("}") + 1
+
+    if start == -1 or end == -1:
+        raise ValueError("JSONが検出できません")
+
+    json_text = raw[start:end]
+
+    return json.loads(json_text)
 
 
 # -----------------------------
@@ -92,6 +113,7 @@ JSONのみ出力：
 def load_state():
     if not os.path.exists(STATE_FILE):
         return {"history": [], "dapp_counts": {}}
+
     with open(STATE_FILE, "r") as f:
         return json.load(f)
 
@@ -106,7 +128,15 @@ def save_state(state):
 # -----------------------------
 def calculate_score(data, state):
     s = data["scores"]
-    total = s["new_dapp"] + s["xp"] + s["skr"] + s["freshness"] + s["risk"]
+
+    total = (
+        s["new_dapp"] +
+        s["xp"] +
+        s["skr"] +
+        s["freshness"] +
+        s["risk"]
+    )
+
     total = max(0, min(100, total))
 
     # dApp出現回数更新
@@ -137,12 +167,19 @@ def skr_range(score):
 # メール作成
 # -----------------------------
 def build_email(data, score, diff, state):
-    ranking = sorted(state["dapp_counts"].items(), key=lambda x: x[1], reverse=True)[:5]
-    ranking_text = "\n".join([f"{r[0]} ({r[1]}回)" for r in ranking])
+    ranking = sorted(
+        state["dapp_counts"].items(),
+        key=lambda x: x[1],
+        reverse=True
+    )[:5]
+
+    ranking_text = "\n".join(
+        [f"{r[0]} ({r[1]}回)" for r in ranking]
+    )
 
     emergency = "【緊急】" if diff >= 15 else ""
 
-    return f"""
+    content = f"""
 {emergency}🔥 L5戦略AI V3 {datetime.now().date()}
 
 【本日スコア】{score}
@@ -157,7 +194,9 @@ def build_email(data, score, diff, state):
 
 🎯 今日の行動提案
 {data["action_plan"]}
-""", emergency
+"""
+
+    return content, emergency
 
 
 # -----------------------------
@@ -175,15 +214,19 @@ def send_email(content, emergency):
 
 
 # -----------------------------
-# 実行
+# メイン実行
 # -----------------------------
 if __name__ == "__main__":
     state = load_state()
+
     text = gather_data()
+
     analysis = analyze(text)
 
     score, diff = calculate_score(analysis, state)
-    email, emergency = build_email(analysis, score, diff, state)
 
-    send_email(email, emergency)
+    email_content, emergency = build_email(analysis, score, diff, state)
+
+    send_email(email_content, emergency)
+
     save_state(state)
